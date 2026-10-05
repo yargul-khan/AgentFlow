@@ -8,15 +8,22 @@ class ToolManager:
 
     def __init__(self):
         self.validator = SafetyValidator()
-        self.tools: dict[str, Callable[..., Any]] = {}
+        self.tools: dict[str, dict[str, Any]] = {}
 
     def register(
         self,
         name: str,
         function: Callable[..., Any],
+        description: str,
+        parameters: dict,
     ) -> None:
-        """Register a tool."""
-        self.tools[name] = function
+        """Register a tool and its LLM schema."""
+
+        self.tools[name] = {
+            "function": function,
+            "description": description,
+            "parameters": parameters,
+        }
 
     def execute(
         self,
@@ -37,7 +44,7 @@ class ToolManager:
             return f"ERROR: Unknown tool '{name}'."
 
         try:
-            result = self.tools[name](**parameters)
+            result = self.tools[name]["function"](**parameters)
             return str(result)
 
         except Exception as error:
