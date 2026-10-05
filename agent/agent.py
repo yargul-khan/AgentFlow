@@ -1,66 +1,61 @@
 import json
-from typing import Any, Callable
+from typing import Any
 
 from openai import OpenAI
+
+from agent.tool_manager import ToolManager
 
 
 class Agent:
     """A lightweight tool-using AI agent."""
 
-    def __init__(self, model: str = "gpt-4o-mini"):
+    def __init__(
+        self,
+        tool_manager: ToolManager,
+        model: str = "gpt-4o-mini",
+    ):
         self.client = OpenAI()
         self.model = model
-        self.tools: dict[str, Callable[..., Any]] = {}
+        self.tool_manager = tool_manager
 
     def register_tool(
         self,
         name: str,
-        function: Callable[..., Any],
         description: str,
         parameters: dict,
     ) -> None:
-        """Register a function the agent can call."""
+        """Register a tool with the agent."""
 
-        self.tools[name] = {
-            "function": function,
-            "description": description,
-            "parameters": parameters,
-        }
+        self.tool_manager.tools[name]["description"] = description
+        self.tool_manager.tools[name]["parameters"] = parameters
 
     def _tool_definitions(self) -> list[dict]:
-        """Convert registered tools into the format expected by the model."""
+        """Build tool definitions for the LLM."""
 
         definitions = []
 
-        for name, tool in self.tools.items():
+        for name, tool in self.tool_manager.tools.items():
             definitions.append(
                 {
                     "type": "function",
                     "function": {
                         "name": name,
-                        "description": tool["description"],
-                        "parameters": tool["parameters"],
+                        "description": tool.get(
+                            "description",
+                            "No description provided.",
+                        ),
+                        "parameters": tool.get(
+                            "parameters",
+                            {
+                                "type": "object",
+                                "properties": {},
+                            },
+                        ),
                     },
                 }
             )
 
         return definitions
-
-    def _execute_tool(self, name: str, arguments: str) -> str:
-        """Execute a registered tool."""
-
-        if name not in self.tools:
-            return f"Error: unknown tool '{name}'."
-
-        try:
-            parsed_arguments = json.loads(arguments)
-
-            result = self.tools[name]["function"](**parsed_arguments)
-
-            return str(result)
-
-        except Exception as error:
-            return f"Tool error: {error}"
 
     def run(self, task: str) -> str:
         """Run the agent until it produces a final answer."""
@@ -71,8 +66,9 @@ class Agent:
                 "content": (
                     "You are an AI automation agent. "
                     "Break complex tasks into smaller steps. "
-                    "Use tools when they are useful. "
-                    "Never invent tool results."
+                    "Use available tools when necessary. "
+                    "Never invent tool results. "
+                    "Only perform actions through the provided tools."
                 ),
             },
             {
@@ -96,9 +92,12 @@ class Agent:
             messages.append(message)
 
             for tool_call in message.tool_calls:
-                result = self._execute_tool(
-                    tool_call.function.name,
-                    tool_call.function.arguments,
+                tool_name = tool_call.function.name
+                arguments = json.loads(tool_call.function.arguments)
+
+                result = self.tool_manager.execute(
+                    tool_name,
+                    arguments,
                 )
 
                 messages.append(
